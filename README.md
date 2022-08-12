@@ -1,7 +1,6 @@
 # Hydra
 
-A http proxy come from [axum](https://github.com/tokio-rs/axum/blob/main/examples/http-proxy/src/main.rs)
-with custom listen address.
+A http proxy base on [hyper](https://github.com/hyperium/hyper/blob/v0.14.20/examples/http_proxy.rs)
 
 ## How to use
 
@@ -23,7 +22,7 @@ Custom listen address:
 
 ```sh
 $ docker run \
-    -p 3000:3000 \
-    -e HYDRA_LISTEN=0.0.0.0:3000 \
+    -p 6000:6000 \
+    -e HYDRA_LISTEN=0.0.0.0:6000 \
     ghcr.io/wutz/hydra:v0.1.0
 ```
