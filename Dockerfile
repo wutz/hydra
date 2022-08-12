@@ -1,8 +1,8 @@
 FROM rust:1-bullseye as build
 
 # create a new empty shell project
-RUN USER=root cargo new --bin http-proxy
-WORKDIR /http-proxy
+RUN USER=root cargo new --bin hydra
+WORKDIR /hydra
 
 # copy over your manifests
 COPY ./Cargo.lock ./Cargo.lock
@@ -18,7 +18,7 @@ RUN cargo build --release \
 COPY ./src ./src
 
 # build for release
-RUN rm ./target/release/deps/http_proxy* \
+RUN rm ./target/release/deps/hydra* \
     && cargo build --release
 
 # our final base
@@ -26,7 +26,7 @@ FROM debian:bullseye-slim
 ENV TZ=Asia/Shanghai
 
 # copy the build artifact from the build stage
-COPY --from=build /http-proxy/target/release/http-proxy /usr/bin/http-proxy
+COPY --from=build /hydra/target/release/hydra /usr/bin/hydra
 
 # set the startup command to run your binary
-CMD ["/usr/bin/http-proxy"]
+CMD ["/usr/bin/hydra"]

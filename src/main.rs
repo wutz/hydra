@@ -28,8 +28,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 async fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG")
-                .unwrap_or_else(|_| "http_proxy=trace,tower_http=debug".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "hydra=trace,tower_http=debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -47,7 +46,7 @@ async fn main() {
         }
     });
 
-    let addr = std::env::var("HTTP_PROXY_LISTEN")
+    let addr = std::env::var("HYDRA_LISTEN")
         .unwrap_or("0.0.0.0:3000".to_string())
         .parse()
         .unwrap();

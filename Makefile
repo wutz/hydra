@@ -1,4 +1,4 @@
-REPO ?= ghcr.io/wutz/http-proxy
+REPO ?= ghcr.io/wutz/hydra
 VERSION ?= $(shell git describe --always --tags)
 
 .PHONY: docker-build
