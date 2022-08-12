@@ -4,13 +4,20 @@ use std::net::SocketAddr;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::upgrade::Upgraded;
 use hyper::{Body, Client, Method, Request, Response, Server};
-
 use tokio::net::TcpStream;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 type HttpClient = Client<hyper::client::HttpConnector>;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "hydra=trace".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
     let client = Client::builder()
@@ -28,15 +35,15 @@ async fn main() {
         .http1_title_case_headers(true)
         .serve(make_service);
 
-    println!("Listening on http://{}", addr);
+    tracing::debug!("listening on {}", addr);
 
     if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+        tracing::error!("server error: {}", e);
     }
 }
 
 async fn proxy(client: HttpClient, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    println!("req: {:?}", req);
+    tracing::trace!(?req);
 
     if Method::CONNECT == req.method() {
         // Received an HTTP request like:
@@ -57,16 +64,16 @@ async fn proxy(client: HttpClient, req: Request<Body>) -> Result<Response<Body>,
                 match hyper::upgrade::on(req).await {
                     Ok(upgraded) => {
                         if let Err(e) = tunnel(upgraded, addr).await {
-                            eprintln!("server io error: {}", e);
+                            tracing::warn!("server io error: {}", e);
                         };
                     }
-                    Err(e) => eprintln!("upgrade error: {}", e),
+                    Err(e) => tracing::warn!("upgrade error: {}", e),
                 }
             });
 
             Ok(Response::new(Body::empty()))
         } else {
-            eprintln!("CONNECT host is not socket addr: {:?}", req.uri());
+            tracing::warn!("CONNECT host is not socket addr: {:?}", req.uri());
             let mut resp = Response::new(Body::from("CONNECT must be to a socket address"));
             *resp.status_mut() = http::StatusCode::BAD_REQUEST;
 
@@ -92,9 +99,10 @@ async fn tunnel(mut upgraded: Upgraded, addr: String) -> std::io::Result<()> {
         tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
 
     // Print message when done
-    println!(
+    tracing::debug!(
         "client wrote {} bytes and received {} bytes",
-        from_client, from_server
+        from_client,
+        from_server
     );
 
     Ok(())
