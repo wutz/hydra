@@ -1,100 +1,100 @@
-//! Run with
-//!
-//! ```not_rust
-//! $ cargo run
-//! ```
-//!
-//! In another terminal:
-//!
-//! ```not_rust
-//! $ curl -v -x "127.0.0.1:3000" https://tokio.rs
-//! ```
-//!
-//! Example is based on <https://github.com/tokio-rs/axum/blob/main/examples/http-proxy/src/main.rs>
+use std::convert::Infallible;
+use std::net::SocketAddr;
 
-use axum::{
-    body::{self, Body},
-    http::{Method, Request, StatusCode},
-    response::{IntoResponse, Response},
-    routing::get,
-    Router,
-};
+use hyper::service::{make_service_fn, service_fn};
 use hyper::upgrade::Upgraded;
+use hyper::{Body, Client, Method, Request, Response, Server};
+
 use tokio::net::TcpStream;
-use tower::{make::Shared, ServiceExt};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+type HttpClient = Client<hyper::client::HttpConnector>;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "hydra=trace,tower_http=debug".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
-    let router = Router::new().route("/", get(|| async { "Hello, World!" }));
+    let client = Client::builder()
+        .http1_title_case_headers(true)
+        .http1_preserve_header_case(true)
+        .build_http();
 
-    let service = tower::service_fn(move |req: Request<Body>| {
-        let router = router.clone();
-        async move {
-            if req.method() == Method::CONNECT {
-                proxy(req).await
-            } else {
-                router.oneshot(req).await.map_err(|err| match err {})
-            }
-        }
+    let make_service = make_service_fn(move |_| {
+        let client = client.clone();
+        async move { Ok::<_, Infallible>(service_fn(move |req| proxy(client.clone(), req))) }
     });
 
-    let addr = std::env::var("HYDRA_LISTEN")
-        .unwrap_or("0.0.0.0:3000".to_string())
-        .parse()
-        .unwrap();
-    tracing::debug!("listening on {}", addr);
-    axum::Server::bind(&addr)
+    let server = Server::bind(&addr)
         .http1_preserve_header_case(true)
         .http1_title_case_headers(true)
-        .serve(Shared::new(service))
-        .await
-        .unwrap();
-}
+        .serve(make_service);
 
-async fn proxy(req: Request<Body>) -> Result<Response, hyper::Error> {
-    tracing::trace!(?req);
+    println!("Listening on http://{}", addr);
 
-    if let Some(host_addr) = req.uri().authority().map(|auth| auth.to_string()) {
-        tokio::task::spawn(async move {
-            match hyper::upgrade::on(req).await {
-                Ok(upgraded) => {
-                    if let Err(e) = tunnel(upgraded, host_addr).await {
-                        tracing::warn!("server io error: {}", e);
-                    };
-                }
-                Err(e) => tracing::warn!("upgrade error: {}", e),
-            }
-        });
-
-        Ok(Response::new(body::boxed(body::Empty::new())))
-    } else {
-        tracing::warn!("CONNECT host is not socket addr: {:?}", req.uri());
-        Ok((
-            StatusCode::BAD_REQUEST,
-            "CONNECT must be to a socket address",
-        )
-            .into_response())
+    if let Err(e) = server.await {
+        eprintln!("server error: {}", e);
     }
 }
 
+async fn proxy(client: HttpClient, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    println!("req: {:?}", req);
+
+    if Method::CONNECT == req.method() {
+        // Received an HTTP request like:
+        // ```
+        // CONNECT www.domain.com:443 HTTP/1.1
+        // Host: www.domain.com:443
+        // Proxy-Connection: Keep-Alive
+        // ```
+        //
+        // When HTTP method is CONNECT we should return an empty body
+        // then we can eventually upgrade the connection and talk a new protocol.
+        //
+        // Note: only after client received an empty body with STATUS_OK can the
+        // connection be upgraded, so we can't return a response inside
+        // `on_upgrade` future.
+        if let Some(addr) = host_addr(req.uri()) {
+            tokio::task::spawn(async move {
+                match hyper::upgrade::on(req).await {
+                    Ok(upgraded) => {
+                        if let Err(e) = tunnel(upgraded, addr).await {
+                            eprintln!("server io error: {}", e);
+                        };
+                    }
+                    Err(e) => eprintln!("upgrade error: {}", e),
+                }
+            });
+
+            Ok(Response::new(Body::empty()))
+        } else {
+            eprintln!("CONNECT host is not socket addr: {:?}", req.uri());
+            let mut resp = Response::new(Body::from("CONNECT must be to a socket address"));
+            *resp.status_mut() = http::StatusCode::BAD_REQUEST;
+
+            Ok(resp)
+        }
+    } else {
+        client.request(req).await
+    }
+}
+
+fn host_addr(uri: &http::Uri) -> Option<String> {
+    uri.authority().and_then(|auth| Some(auth.to_string()))
+}
+
+// Create a TCP connection to host:port, build a tunnel between the connection and
+// the upgraded connection
 async fn tunnel(mut upgraded: Upgraded, addr: String) -> std::io::Result<()> {
+    // Connect to remote server
     let mut server = TcpStream::connect(addr).await?;
 
+    // Proxying data
     let (from_client, from_server) =
         tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
 
-    tracing::debug!(
+    // Print message when done
+    println!(
         "client wrote {} bytes and received {} bytes",
-        from_client,
-        from_server
+        from_client, from_server
     );
 
     Ok(())
