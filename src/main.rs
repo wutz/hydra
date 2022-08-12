@@ -1,9 +1,7 @@
-use std::convert::Infallible;
-use std::net::SocketAddr;
-
 use hyper::service::{make_service_fn, service_fn};
 use hyper::upgrade::Upgraded;
 use hyper::{Body, Client, Method, Request, Response, Server};
+use std::convert::Infallible;
 use tokio::net::TcpStream;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -18,7 +16,10 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = std::env::var("HYDRA_LISTEN")
+        .unwrap_or("0.0.0.0:3000".into())
+        .parse()
+        .expect("parse HYDRA_LISTEN");
 
     let client = Client::builder()
         .http1_title_case_headers(true)
