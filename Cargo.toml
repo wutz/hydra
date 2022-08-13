@@ -8,6 +8,6 @@ edition = "2021"
 [dependencies]
 http = "0.2.8"
 hyper = { version = "0.14.20", features = ["client", "server", "http1", "http2", "tcp"] }
-tokio = { version = "1.20.1", features = ["io-std", "macros", "io-util", "rt-multi-thread", "net"] }
+tokio = { version = "1.20.1", features = ["io-std", "macros", "io-util", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1.36"
 tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }

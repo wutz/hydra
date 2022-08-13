@@ -3,6 +3,7 @@ use hyper::upgrade::Upgraded;
 use hyper::{Body, Client, Method, Request, Response, Server};
 use std::convert::Infallible;
 use tokio::net::TcpStream;
+use tokio::signal::unix::{signal, SignalKind};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 type HttpClient = Client<hyper::client::HttpConnector>;
@@ -34,7 +35,17 @@ async fn main() {
     let server = Server::bind(&addr)
         .http1_preserve_header_case(true)
         .http1_title_case_headers(true)
-        .serve(make_service);
+        .serve(make_service)
+        .with_graceful_shutdown(async {
+            let mut signal_int =
+                signal(SignalKind::interrupt()).expect("failed to install CTRL+C signal handler");
+            let mut signal_term =
+                signal(SignalKind::terminate()).expect("failed to install TERM signal handler");
+            tokio::select! {
+                _ = signal_int.recv() => tracing::debug!("ctrl-c received"),
+                _ = signal_term.recv() => tracing::debug!("signal term received"),
+            }
+        });
 
     tracing::debug!("listening on {}", addr);
 
